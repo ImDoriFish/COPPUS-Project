@@ -2,6 +2,8 @@ import cv2
 import pymupdf
 import numpy as np
 from pathlib import Path
+from layout import PAGE_SIZES
+from identify import identify_page
 
 
 # ---------- Folders and settings ----------
@@ -207,7 +209,7 @@ def order_corners(corners):
     ], dtype=np.float32)
 
 
-# ---------- Step 6: straighten the table ----------
+# ---------- straighten the table ----------
 
 def table_size(corners):
     """Measure the table's (width, height) in pixels from its 4 ORDERED corners.
@@ -242,6 +244,15 @@ def warp_table(gray, corners):
     matrix = cv2.getPerspectiveTransform(corners, dst)   # the "how to move pixels" recipe
     return cv2.warpPerspective(gray, matrix, (w, h))     # size is (width, height)!
 
+
+# ---------- normalized the table ----------
+
+def normalize_table(table, page):
+    """Resize a warped table to its page's exact stored size (layout.PAGE_SIZES).
+    """
+
+    return cv2.resize(table, PAGE_SIZES[page])
+
 # ---------- Pipeline: run all prep steps on every page ----------
 
 def debug_name(source, step):
@@ -258,8 +269,10 @@ def prepare_pages(file_names, debug_dir=None):
     debug_dir:  None (default) -> keep everything in memory, save nothing
                 a folder       -> also save each page's result there to look at
 
-    Returns a list of (source, prepared_image) tuples, same labels as
-    load_pages, e.g. [("stack.pdf p1", upright_gray), ...]
+    Returns a list of (source, page, table) tuples, in upload order:
+        source  "stack.pdf p1"  - where the page came from
+        page    1 or 2          - which COPUS page (0-30 or 30-50 min)
+        table   the straight table, exactly PAGE_SIZES[page]
     """
     if debug_dir is not None:
         debug_dir.mkdir(parents=True, exist_ok=True)
@@ -275,12 +288,20 @@ def prepare_pages(file_names, debug_dir=None):
         corners = order_corners(corners)
         table = warp_table(upright, corners) 
 
+        try:
+            page = identify_page(table)
+        except ValueError as e:
+            # Same error, but with the page's label so the user knows WHICH page
+            raise ValueError(f"{source}: {e}") from e
+
+        table = normalize_table(table, page)
+
         if debug_dir is not None:
             cv2.imwrite(str(debug_dir / debug_name(source, "upright")), upright)
             cv2.imwrite(str(debug_dir / debug_name(source, "thresh")), binary)
             cv2.imwrite(str(debug_dir / debug_name(source, "border")), draw_corners(upright, corners))
             cv2.imwrite(str(debug_dir / debug_name(source, "warped")), table)
-        prepared.append((source, table))
+        prepared.append((source, page, table))
 
     return prepared
 
@@ -293,5 +314,5 @@ if __name__ == "__main__":
     # Run the whole prep pipeline and save each page's result to out/ to look at
     pages = prepare_pages(["blank_01.pdf", "blank_02.pdf"], debug_dir=OUT_DIR)
 
-    for source, img in pages:
-        print(source, img.shape)
+    for source, page, table in pages:
+        print(source,"-> page", page, table.shape)

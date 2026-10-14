@@ -6,7 +6,9 @@ import pytest
 from itertools import permutations
 
 from image_prep import (image_converter, load_pages, to_gray, rotate_upright,
-                        prepare_pages, threshold, find_table_corners, order_corners)
+                        prepare_pages, threshold, find_table_corners, order_corners,
+                        normalize_table)
+from layout import PAGE_SIZES
 
 # ---------- Fixtures (shared setup) ----------
 
@@ -154,13 +156,25 @@ def test_fake_image_dark_bottom_gets_flipped():
 
 # ---------- prepare_pages ----------
 
-def test_prepare_returns_upright_gray_pages():
+def test_prepare_returns_identified_tables():
     pages = prepare_pages(["blank_01.pdf", "blank_02.pdf"])
-    assert [src for src, img in pages] == ["blank_01.pdf p1", "blank_02.pdf p1"]
-    for src, img in pages:
-        assert img.ndim == 2                 # grayscale
-        h, w = img.shape
-        assert w > h                         # upright = landscape
+    assert [(src, page) for src, page, table in pages] == [
+        ("blank_01.pdf p1", 1), ("blank_02.pdf p1", 2)]
+    for src, page, table in pages:
+        assert table.ndim == 2                      # grayscale
+        w, h = PAGE_SIZES[page]
+        assert table.shape == (h, w)                # exactly the stored size
+
+
+def test_prepare_error_names_the_page(tmp_path):
+    # A fake scan whose "table" is a square - matches neither COPUS page.
+    # The error must say WHICH file/page failed.
+    page_img = np.full((1600, 1200, 3), 255, dtype=np.uint8)              # white, portrait
+    cv2.rectangle(page_img, (100, 300), (1100, 1300), (0, 0, 0), 15)      # 1000 x 1000 square
+    path = tmp_path / "square.png"
+    cv2.imwrite(str(path), page_img)
+    with pytest.raises(ValueError, match=r"^square\.png: "):
+        prepare_pages([path])
 
 
 def test_prepare_debug_dir_saves_images(tmp_path):
@@ -238,3 +252,22 @@ def test_order_corners_any_input_order():
     pts = [[100, 0], [0, 0], [0, 50], [100, 50]]
     for shuffled in permutations(pts):
         assert order_corners(list(shuffled)).tolist() == [[0, 0], [100, 0], [100, 50], [0, 50]]
+
+
+# ---------- normalize_table ----------
+
+@pytest.mark.parametrize("page", [1, 2])
+def test_normalize_gives_exact_stored_size(page):
+    w, h = PAGE_SIZES[page]
+    slightly_off = np.zeros((h + 3, w - 4), dtype=np.uint8)     # a few px off
+    assert normalize_table(slightly_off, page).shape == (h, w)
+
+
+def test_normalize_stretches_not_pads():
+    # A table whose right edge is a white line; after resizing, the line
+    # must still be at the right edge (stretched), not moved inward (padded)
+    w, h = PAGE_SIZES[1]
+    table = np.zeros((h, w - 20), dtype=np.uint8)
+    table[:, -5:] = 255
+    out = normalize_table(table, 1)
+    assert out[:, -3:].mean() > 200
