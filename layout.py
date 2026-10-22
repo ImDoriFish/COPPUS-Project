@@ -33,6 +33,9 @@ INTER_COLS      = list(range(31, 33))    # [31, 32]
 # Every page has this many vertical lines (34 columns) - used to check a scan
 COL_LINE_COUNT = 35
 
+# How many interval rows each kind of page has
+ROLE_INTERVALS = {"FIRST": 15, "MIDDLE": 15, "LAST": 10}
+
 
 # ---------- Observation types ----------
 
