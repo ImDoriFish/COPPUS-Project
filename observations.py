@@ -20,6 +20,7 @@ def group_observations(pages):
 
     observation = []
 
+    for i in range(0, len(pages), 2):
 
         #If there is a page after the current page to pair it
         if i + 1 >= len(pages):
@@ -33,7 +34,7 @@ def group_observations(pages):
         b_page_number = b[1]
 
         if {a_page_number, b_page_number} == {1, 2}:
-            if a_page_number == 1: #checking if the first page is page 1
+            if a_page_number == 1: #checking if the first page is page
                 observation.append((a, b)) # insert if the right order
             else:
                 observation.append((b, a)) #flip if the order is wrong then insert
@@ -43,3 +44,15 @@ def group_observations(pages):
                 "keep each observation's two pages next to each other")
 
     return observation
+
+# ---------- Manual check ----------
+
+if __name__ == "__main__":
+    from image_prep import prepare_pages
+
+    pages = prepare_pages(["filled_page.pdf"])
+    observations = group_observations(pages)
+
+    print(f"{len(pages)} pages -> {len(observations)} observation(s)")
+    for n, (page1, page2) in enumerate(observations, start=1):
+        print(f"  observation {n}: {page1[0]} (page {page1[1]}) + {page2[0]} (page {page2[1]})")
