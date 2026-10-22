@@ -1,7 +1,9 @@
 import cv2
 import numpy as np
 
-from image_prep import prepare_pages, threshold
+
+from image_prep import (load_pages, to_gray, rotate_upright, threshold,
+                        find_table_corners, order_corners, warp_table)
 """One-time tool: measure where the grid lines are on the blank forms.
 
 Run it once:   python measure_grid.py
@@ -77,17 +79,18 @@ def find_lines(binary, direction):
     return merged_line
 
 if __name__ == "__main__":
-    for source, page, table in prepare_pages(["blank_01.pdf", "blank_02.pdf"]):
+    for source, img in load_pages(["blank_50.pdf", "blank_80.pdf", "blank_110.pdf"]):
+        gray = to_gray(img)
+        upright = rotate_upright(gray)
+        corners = order_corners(find_table_corners(threshold(upright)))
+        table = warp_table(upright, corners)
+
         binary = threshold(table)
         ys = find_lines(binary, "horizontal")
         xs = find_lines(binary, "vertical")
 
-        print(f"\n===== {source} -> page {page}, table {table.shape[1]} x {table.shape[0]} =====")
-        for name, found in (("horizontal", ys), ("vertical", xs)):
-            expected = EXPECTED[page][name]
-            status = "OK" if len(found) == expected else f"WARNING: expected {expected}"
-            print(f"{name}: {len(found)} lines  [{status}]")
-
-        # Ready to paste into layout.py
-        print(f"ROW_LINES[{page}] = {ys}")
-        print(f"COL_LINES[{page}] = {xs}")
+        print(f"\n===== {source}, table {table.shape[1]} x {table.shape[0]} =====")
+        print(f"horizontal: {len(ys)} lines")
+        print(f"vertical:   {len(xs)} lines")
+        print(f"row lines: {ys}")
+        print(f"col lines: {xs}")
