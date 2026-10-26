@@ -147,7 +147,8 @@ def has_header(binary, corners):
     left = int(top_left[0])                     # only look straight above the table
     right = int(top_right[0])
 
-    area = binary[0 : top - HEADER_GAP, left : right]   # rows first (y), then columns (x)
+    bottom = max(top - HEADER_GAP, 0)          # never negative (a negative index would wrap around)
+    area = binary[0 : bottom, left : right]   # rows first (y), then columns (x)
     if area.size == 0:
         return False                      # table starts at the very top: no room for a header
 
