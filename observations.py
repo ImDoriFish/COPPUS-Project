@@ -1,58 +1,93 @@
 """
-One observation = one COPUS page 1 (0-30 min) + one page 2 (30-50 min).
-Pages come in upload order. The two pages of an observation must be
-NEXT TO EACH OTHER, in either order (A1 A2 or A2 A1). Mixing observations
-(A1 B1 A2 B2) or leaving a page without its partner is an error.
+One observation = one FIRST page, then any MIDDLE pages, then one LAST page:
+  50 min  = FIRST LAST
+  80 min  = FIRST MIDDLE LAST
+  110 min = FIRST MIDDLE MIDDLE LAST
+Pages come in upload order. Each observation's pages must be together and
+in order. Anything else (a page outside an observation, a missing FIRST or
+LAST page, an unknown length) is an error naming the page.
 """
 
-def group_observations(pages): 
-    """Pair each page 1 with the page 2 next to it.
+from layout import OBS_TYPES
 
-    pages: the list from prepare_pages, in upload order:
-           [(source, page, table), ...]   e.g. ("filled_page.pdf p1", 1, table)
 
-    Returns a list of observations, each a pair (page 1 item, page 2 item),
-    always with page 1 first.
+def group_observations(pages):
+    """Group the pages into observations: FIRST, MIDDLE..., LAST.
 
-    Raises ValueError (naming the page) if a page has no partner or two
-    neighbours aren't one page 1 + one page 2.
+    pages: the list from prepare_pages, in upload order - one dict per page,
+           e.g. {"source": "obs01.pdf p1", "role": "FIRST", "table": ..., ...}
+
+    Returns a list of observations, each a tuple (obs_type, pages):
+        obs_type  50 / 80 / 110 (from the number of pages, see layout.OBS_TYPES)
+        pages     that observation's page dicts, in order (page 1 first)
+    e.g. [(80, [page_A, page_B, page_C]), (50, [page_D, page_E])]
+
+    Raises ValueError naming the page if the pages don't fit together.
     """
+    observations = []
+    current = None              # pages of the observation being collected (None = none open)
 
-    observation = []
+    for page in pages:
+        role = page["role"]
+        source = page["source"]
 
-    for i in range(0, len(pages), 2):
+        if role == "FIRST":
+            if current is not None:
+                raise ValueError(f"{source}: new first page, but the observation before it "
+                                 f"(starting at {current[0]['source']}) has no last page")
+            current = [page]                        # start a new observation
 
-        #If there is a page after the current page to pair it
-        if i + 1 >= len(pages):
-            source = pages[i][0]
-            raise ValueError(f"{source}: no matching page - upload both pages of each observation together")
+        elif role == "MIDDLE":
+            if current is None:
+                raise ValueError(f"{source}: middle page with no first page before it")
+            current.append(page)
 
-        # (source, page, table)
-        a = pages[i] # either page 1 or 2
-        b = pages[i + 1] #also page 1 or 2
-        a_page_number = a[1]
-        b_page_number = b[1]
+        else:  # "LAST"
+            if current is None:
+                raise ValueError(f"{source}: last page with no first page before it")
+            current.append(page)
 
-        if {a_page_number, b_page_number} == {1, 2}:
-            if a_page_number == 1: #checking if the first page is page
-                observation.append((a, b)) # insert if the right order
-            else:
-                observation.append((b, a)) #flip if the order is wrong then insert
-        else:
-            raise ValueError(
-                f"{a[0]} (page {a_page_number}) and {b[0]} (page {b_page_number}) are not a page 1 + page 2 pair - "
-                "keep each observation's two pages next to each other")
+            count = len(current)
+            if count not in OBS_TYPES:
+                raise ValueError(f"{source}: observation starting at {current[0]['source']} "
+                                 f"has {count} pages - no COPUS form has that many")
 
-    return observation
+            observations.append((OBS_TYPES[count], current))   # finished
+            current = None                                      # nothing open now
+
+    if current is not None:
+        raise ValueError(f"{current[-1]['source']}: observation starting at "
+                         f"{current[0]['source']} has no last page")
+
+    return observations
+
 
 # ---------- Manual check ----------
 
 if __name__ == "__main__":
     from image_prep import prepare_pages
 
-    pages = prepare_pages(["filled_page.pdf"])
+    pages = prepare_pages(["blank_50.pdf", "blank_80.pdf", "blank_110.pdf"])
     observations = group_observations(pages)
 
     print(f"{len(pages)} pages -> {len(observations)} observation(s)")
-    for n, (page1, page2) in enumerate(observations, start=1):
-        print(f"  observation {n}: {page1[0]} (page {page1[1]}) + {page2[0]} (page {page2[1]})")
+    for n, (obs_type, obs_pages) in enumerate(observations, start=1):
+        sources = ", ".join(page["source"] for page in obs_pages)
+        print(f"  observation {n}: {obs_type} min - {sources}")
+
+    # Wrong uploads: each one should give a clear error
+    print("\nWrong uploads:")
+    first, middle, last = pages[2], pages[3], pages[4]      # blank_80 p1, p2, p3
+    wrong = {
+        "missing first page":   [middle, last],
+        "missing last page":    [first, middle],
+        "last page twice":      [first, last, last],
+        "first page twice":     [first, first, last],
+        "too many middles":     [first, middle, middle, middle, last],
+    }
+    for name, test_pages in wrong.items():
+        try:
+            group_observations(test_pages)
+            print(f"  {name}: NO ERROR (bug!)")
+        except ValueError as e:
+            print(f"  {name}: {e}")

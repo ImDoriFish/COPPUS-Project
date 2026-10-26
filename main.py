@@ -31,11 +31,11 @@ def main():
         return
     print(f"Found {len(files)} file(s): {', '.join(files)}")
 
-    pages = prepare_pages(files)                  # load, straighten, identify page 1/2
-    observations = group_observations(pages)      # pair page 1 + page 2
+    pages = prepare_pages(files)                  # load, straighten, measure grid, find role
+    observations = group_observations(pages)     # FIRST, MIDDLE..., LAST -> 50/80/110 min
     print(f"{len(pages)} page(s) -> {len(observations)} observation(s)")
 
-    table = build_table(observations)             # read every checkbox, 25 rows each
+    table = build_table(observations)             # read every checkbox, one row per interval
     save_csv(table, OUTPUT_CSV)
     print(f"Saved {len(table)} rows to {OUTPUT_CSV}")
 

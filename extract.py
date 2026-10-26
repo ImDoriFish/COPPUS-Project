@@ -146,7 +146,7 @@ def read_page(page, labels):
     return rows
 
 
-def draw_results(labels, page):
+def draw_results(page, labels):
     """Debug picture of what read_page decided, to compare with the paper.
 
     Green box = checked (ink above CHECK_THRESHOLD), red box = empty.
