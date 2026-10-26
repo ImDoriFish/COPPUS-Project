@@ -4,26 +4,31 @@ from pathlib import Path
 import pandas as pd
 
 from extract import read_page, CODE_NAMES
+from layout import INTERVALS
 
 def observation_rows(observation, name):
-    """Read both pages of one observation and join them into 25 rows.
+    """Read every page of one observation and join them into one list of rows.
 
-    observation: one pair from group_observations:
-                 ((source1, 1, table1), (source2, 2, table2))  - page 1 first
-    name:        what to call this observation, e.g. "filled_page_obs1"
+    observation: one (obs_type, pages) tuple from group_observations,
+                 e.g. (80, [page_1, page_2, page_3]) - pages in order
+    name:        what to call this observation, e.g. "obs01_obs1"
 
-    Returns 25 row dicts (15 from page 1 + 10 from page 2), in time order,
-    each with two extra keys: "observation" and "source".
+    Returns one row dict per 2-minute interval, in time order
+    (25 for 50 min, 40 for 80 min, 55 for 110 min), each with three extra
+    keys: "observation", "obs_type" and "source".
     """
-    page1, page2 = observation
-    source1, _, table1 = page1          # _ = page number, not needed (we know it's 1)
-    source2, _, table2 = page2          # (and this one is 2)
+    obs_type, pages = observation
 
-    rows = read_page(table1, 1) + read_page(table2, 2)    # 15 + 10 = 25 rows, 0-2 ... 48-50
+    rows = []
+    for page_number, page in enumerate(pages, start=1):     # 1, 2, 3, ...
+        labels = INTERVALS[obs_type][page_number]           # e.g. INTERVALS[80][3] = "60-62" ... "78-80"
+        rows += read_page(page, labels)                     # this page's intervals, in order
 
+    sources = " + ".join(page["source"] for page in pages)  # e.g. "obs01.pdf p1 + obs01.pdf p2 + ..."
     for row in rows:
-        row["observation"] = name                          # which class
-        row["source"] = f"{source1} + {source2}"           # which pages, to find the paper
+        row["observation"] = name                           # which class
+        row["obs_type"] = obs_type                          # 50 / 80 / 110 min
+        row["source"] = sources                             # which pages, to find the paper
 
     return rows
 
@@ -38,26 +43,27 @@ def file_stem(source):
 def build_table(observations):
     """Read every observation and put all the rows into one table.
 
-    observations: the list from group_observations
-    Returns a pandas DataFrame: one row per 2-minute interval (25 per
-    observation), columns observation, source, interval, then every code.
+    observations: the list from group_observations, [(obs_type, pages), ...]
+    Returns a pandas DataFrame: one row per 2-minute interval,
+    columns observation, obs_type, source, interval, then every code.
     """
     all_rows = []
     count_per_file = {}                  # how many observations each file has had so far
 
     for observation in observations:
-        page1_source = observation[0][0]                      # e.g. "filled_page.pdf p1"
-        stem = file_stem(page1_source)                        # e.g. "filled_page"
+        obs_type, pages = observation
+        first_source = pages[0]["source"]                     # e.g. "obs01.pdf p1"
+        stem = file_stem(first_source)                        # e.g. "obs01"
 
         count_per_file[stem] = count_per_file.get(stem, 0) + 1
-        name = f"{stem}_obs{count_per_file[stem]}"            # e.g. "filled_page_obs1"
+        name = f"{stem}_obs{count_per_file[stem]}"            # e.g. "obs01_obs1"
 
-        all_rows.extend(observation_rows(observation, name))  # add its 25 rows
+        all_rows.extend(observation_rows(observation, name))  # add its rows
 
     table = pd.DataFrame(all_rows)
 
     # Put the columns in a sensible order: labels first, then every code
-    columns = ["observation", "source", "interval"] + [name for _, name in CODE_NAMES]
+    columns = ["observation", "obs_type", "source", "interval"] + [name for _, name in CODE_NAMES]
     return table[columns]
 
 
@@ -65,24 +71,22 @@ def save_csv(table, path):
     path.parent.mkdir(parents=True, exist_ok=True)
     table.to_csv(path, index=False)
 
-# ---------- Manual check ----------
-
 if __name__ == "__main__":
     from image_prep import prepare_pages
     from observations import group_observations
 
-    pages = prepare_pages(["filled_page.pdf"])
+    pages = prepare_pages(["blank_50.pdf", "blank_80.pdf", "blank_110.pdf"])
     observations = group_observations(pages)
 
-    rows = observation_rows(observations[0], "filled_page_obs1")
-
+    # One observation: check the first and last interval
+    rows = observation_rows(observations[1], "blank_80_obs1")        # the 80-min form
     print(f"{len(rows)} rows")
     print("first:", rows[0]["interval"], "| last:", rows[-1]["interval"])
-    print("observation:", rows[0]["observation"])
+    print("observation:", rows[0]["observation"], "| obs_type:", rows[0]["obs_type"])
     print("source:     ", rows[0]["source"])
 
-
+    # Everything together
     table = build_table(observations)
-
-    print(table)
+    print()
+    print(table.groupby(["observation", "obs_type"]).size())        # rows per observation
     print(f"\n{table.shape[0]} rows x {table.shape[1]} columns")

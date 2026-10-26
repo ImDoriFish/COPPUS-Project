@@ -2,9 +2,7 @@ import cv2
 import pymupdf
 import numpy as np
 from pathlib import Path
-from layout import PAGE_SIZES
-from identify import identify_page
-
+from grid import measure_table, page_role
 
 # ---------- Folders and settings ----------
 
@@ -263,16 +261,21 @@ def debug_name(source, step):
 
 
 def prepare_pages(file_names, debug_dir=None):
-    """Load every page and run the prep steps on it.
+    """Load every page, straighten its table, and measure its grid.
 
     file_names: list of PDFs / images (or a single name), in upload order
     debug_dir:  None (default) -> keep everything in memory, save nothing
                 a folder       -> also save each page's result there to look at
 
-    Returns a list of (source, page, table) tuples, in upload order:
-        source  "stack.pdf p1"  - where the page came from
-        page    1 or 2          - which COPUS page (0-30 or 30-50 min)
-        table   the straight table, exactly PAGE_SIZES[page]
+    Returns a list with one dict per page, in upload order:
+        "source"         "stack.pdf p1"  - where the page came from
+        "role"           "FIRST" / "MIDDLE" / "LAST"
+        "table"          the straight (warped) table, grayscale
+        "row_lines"      y of every horizontal line in the table
+        "col_lines"      x of every vertical line in the table
+        "interval_rows"  row numbers of the rows with checkboxes
+
+    Raises ValueError naming the page if its grid can't be measured.
     """
     if debug_dir is not None:
         debug_dir.mkdir(parents=True, exist_ok=True)
@@ -289,21 +292,29 @@ def prepare_pages(file_names, debug_dir=None):
         table = warp_table(upright, corners) 
 
         try:
-            page = identify_page(table)
+            row_lines, col_lines, interval_rows = measure_table(threshold(table))
+            role = page_role(row_lines, interval_rows, binary, corners)
         except ValueError as e:
             # Same error, but with the page's label so the user knows WHICH page
             raise ValueError(f"{source}: {e}") from e
-
-        table = normalize_table(table, page)
 
         if debug_dir is not None:
             cv2.imwrite(str(debug_dir / debug_name(source, "upright")), upright)
             cv2.imwrite(str(debug_dir / debug_name(source, "thresh")), binary)
             cv2.imwrite(str(debug_dir / debug_name(source, "border")), draw_corners(upright, corners))
             cv2.imwrite(str(debug_dir / debug_name(source, "warped")), table)
-        prepared.append((source, page, table))
+
+        prepared.append({
+            "source": source,
+            "role": role,
+            "table": table,
+            "row_lines": row_lines,
+            "col_lines": col_lines,
+            "interval_rows": interval_rows,
+        })
 
     return prepared
+
 
 
 
@@ -311,8 +322,9 @@ def prepare_pages(file_names, debug_dir=None):
 # ---------- Manual check ----------
 
 if __name__ == "__main__":
-    # Run the whole prep pipeline and save each page's result to out/ to look at
-    pages = prepare_pages(["blank_01.pdf", "blank_02.pdf"], debug_dir=OUT_DIR)
+    # Run the whole prep pipeline on the new blank forms and save each page's images to out/
+    pages = prepare_pages(["blank_50.pdf", "blank_80.pdf", "blank_110.pdf"], debug_dir=OUT_DIR)
 
-    for source, page, table in pages:
-        print(source,"-> page", page, table.shape)
+    for page in pages:
+        print(f"{page['source']:18} {page['role']:6}  "
+              f"{len(page['interval_rows'])} interval rows, table {page['table'].shape}")
