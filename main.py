@@ -3,7 +3,7 @@ from observations import group_observations
 from export import build_table, save_csv
 
 # The blank forms used to build layout.py - not real observations
-TEMPLATES = {"blank_01.pdf", "blank_02.pdf"}
+TEMPLATES = {"blank_50.pdf", "blank_80.pdf", "blank_110.pdf"}
 
 # File types we can read
 SCAN_EXTS = {".pdf"} | IMAGE_EXTS          # .pdf, .png, .jpg, .jpeg

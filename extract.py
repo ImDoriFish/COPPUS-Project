@@ -1,8 +1,8 @@
 import cv2
 import numpy as np
-from layout import (STUDENT, INSTRUCTOR, ENGAGEMENT,
-                    STUDENT_COLS, INSTRUCTOR_COLS, ENGAGEMENT_COLS)
-from image_prep import threshold
+from layout import (STUDENT, INSTRUCTOR, ENGAGEMENT, INTER,
+                    STUDENT_COLS, INSTRUCTOR_COLS, ENGAGEMENT_COLS, INTER_COLS)
+from image_prep import threshold, OUT_DIR
 
 # Threshold of how much ink inside of a check box
 CHECK_THRESHOLD = 0.03
@@ -12,7 +12,7 @@ CODE_COLS = STUDENT_COLS + INSTRUCTOR_COLS + ENGAGEMENT_COLS
 
 # How many pixels to shrink each cell on every side, so the box stays
 # inside the cell and doesn't include the grid lines.
-CELL_MARGIN = 12
+CELL_MARGIN = 8
 
 CODE_NAMES = []
 
@@ -172,6 +172,94 @@ def draw_results(page, labels):
             cv2.rectangle(picture, (x0, y0), (x1, y1), color, 3)
 
     return picture
+
+
+# ---------- Crops for the model (InterI / InterT, later Comments / Summary) ----------
+#
+# Cut cells out of the GRAY table and enlarge them, so vlm.py can send them to
+# the vision model. Uses the same cell_box (and CELL_MARGIN) as the checkboxes.
+
+# Enlarge every crop this many times - cells are only ~60 x 95 px at 300 dpi,
+# and vision models do better on bigger images.
+CROP_SCALE = 4
+
+# Where save_crops writes the crops (only for looking at them)
+CROPS_DIR = OUT_DIR / "crops"
+
+# Tally-mark columns: (column number, CSV name), like CODE_NAMES
+INTER_NAMES = []
+for i in range(len(INTER)):
+    INTER_NAMES.append((INTER_COLS[i], "E_" + INTER[i]))      # → (31, "E_InterI")
+
+
+def crop_cell(page, row, col):
+    """Cut one cell out of the table and enlarge it, ready to send to the model.
+
+    page: one page dict from prepare_pages
+    row:  row number (from page["interval_rows"])
+    col:  column number, e.g. 31 = InterI
+
+    Returns a NEW gray image, CROP_SCALE times bigger than the cell
+    (CELL_MARGIN cut off each side, so the grid lines stay out).
+    """
+    x0, y0, x1, y1 = cell_box(page, row, col)          # where the cell is (same as for checkboxes)
+    cell = page["table"][y0:y1, x0:x1]                 # cut it from the GRAY table: real pen strokes
+    return cv2.resize(cell, None, fx=CROP_SCALE, fy=CROP_SCALE, interpolation=cv2.INTER_CUBIC)   # enlarge
+
+
+def inter_crops(page, labels):
+    """Crop the InterI and InterT cell of every interval row on one page.
+
+    page:   one page dict from prepare_pages
+    labels: the interval label of each interval row, top to bottom
+            (same as read_page), e.g. INTERVALS[80][3] = ["60-62", ..., "78-80"]
+
+    Returns one dict per crop, in order (2 per interval row), e.g.
+      [{"interval": "60-62", "name": "E_InterI", "image": <crop>},
+       {"interval": "60-62", "name": "E_InterT", "image": <crop>},
+       {"interval": "62-64", "name": "E_InterI", "image": <crop>}, ...]
+    Raises ValueError if the page has a different number of interval rows than labels.
+    """
+    interval_rows = page["interval_rows"]
+    if len(labels) != len(interval_rows):
+        raise ValueError(f"{page['source']}: {len(interval_rows)} interval rows "
+                         f"but {len(labels)} labels")
+
+    crops = []
+    for i in range(len(interval_rows)):
+        row = interval_rows[i]                       # row number, e.g. 2
+        for col, name in INTER_NAMES:                # (31, "E_InterI"), (32, "E_InterT")
+            crops.append({
+                "interval": labels[i],               # which row of the CSV, e.g. "60-62"
+                "name": name,                        # which column of the CSV
+                "image": crop_cell(page, row, col),  # the enlarged cell
+            })
+    return crops
+
+
+#debug
+def save_crops(crops, source, out_dir=OUT_DIR / "crops"):
+    """Save crops as PNG files, to look at them (not needed by the pipeline).
+
+    crops:   the list from inter_crops (each has "interval", "name", "image")
+    source:  the page's source label, e.g. "obs01.pdf p2" - goes into the file name
+    out_dir: folder to save in (created if needed)
+
+    File names say where each crop came from, e.g.
+        out/crops/obs01_pdf_p2_30-32_E_InterI.png
+    Returns the list of saved paths.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = source.replace(".", "_").replace(" ", "_")     # "obs01.pdf p2" -> "obs01_pdf_p2"
+
+    paths = []
+    for crop in crops:
+        path = out_dir / f"{stem}_{crop['interval']}_{crop['name']}.png"
+        cv2.imwrite(str(path), crop["image"])
+        paths.append(path)
+    return paths
+
+
 # ---------- Manual check ----------
 
 if __name__ == "__main__":
@@ -248,3 +336,12 @@ if __name__ == "__main__":
         name = out_name(page, "_results.png")
         cv2.imwrite(str(OUT_DIR / name), draw_results(page, labels))
         print(f"{page['source']}: saved {name}")
+
+    # ---- Check 6: crops for the model (InterI / InterT) ----
+    print("\n===== Check 6: InterI / InterT crops -> out/crops/ =====")
+    for page, labels in blanks + filled:
+        crops = inter_crops(page, labels)
+        paths = save_crops(crops, page["source"])
+        darkest = max(int((crop["image"] < 128).sum()) for crop in crops)   # dark pixels in any crop
+        print(f"{page['source']:18} saved {len(paths)} crops, e.g. {paths[0].name}  "
+              f"(most dark pixels in one crop: {darkest})")
