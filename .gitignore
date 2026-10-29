@@ -22,3 +22,10 @@ desktop.ini
 .DS_Store
 # ---------- Personal notes ----------
 CLAUDE.md
+# ---------- Real observation data (may contain names) ----------
+# Ignore all scans except the blank templates, which the code and tests need
+scans/*
+!scans/blank_50.pdf
+!scans/blank_80.pdf
+!scans/blank_110.pdf
+Sup_pic/

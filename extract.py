@@ -2,10 +2,14 @@ import cv2
 import numpy as np
 from layout import (STUDENT, INSTRUCTOR, ENGAGEMENT, INTER,
                     STUDENT_COLS, INSTRUCTOR_COLS, ENGAGEMENT_COLS, INTER_COLS)
-from image_prep import threshold, OUT_DIR
+from image_prep import OUT_DIR
 
 # Threshold of how much ink inside of a check box
 CHECK_THRESHOLD = 0.03
+
+# A pixel counts as ink if it's at least this much darker than the paper (0-255 gray levels).
+# Not Otsu: on scans with very dark grid lines, Otsu's cut-off drops light pencil marks.
+INK_DROP = 30
 
 # All columns that hold checkboxes, left to right
 CODE_COLS = STUDENT_COLS + INSTRUCTOR_COLS + ENGAGEMENT_COLS
@@ -88,16 +92,30 @@ def ink_fraction(binary, page, row, col):
 
     return fraction
 
+def ink_mask(table):
+    """Black-and-white version of the table for reading boxes: ink = 255, paper = 0.
+
+    A pixel is ink if it's at least INK_DROP darker than the paper. The paper
+    colour is the table's median gray (most of the table is white paper), so it
+    adapts to each scan.
+    """
+    paper = np.median(table)
+
+    cutoff = paper - INK_DROP
+    dark_pixels = table < cutoff
+    mask = dark_pixels * 255
+    mask = mask.astype(np.uint8)
+
+    return mask
+
 def measure_page(page):
     """Measure the ink in EVERY checkbox on one page.
-
-    table: a prepared (gray, normalized) table from prepare_pages
-    page:  1 or 2
+    page:  
 
     Thresholds the table once, then calls ink_fraction for each box.
     Returns a dict {(row, col): ink fraction}, e.g. {(2, 1): 0.0, (3, 1): 0.123, ...}
     """
-    binary = threshold(page["table"])            # ONCE for the whole page
+    binary = ink_mask(page["table"])            # ONCE for the whole page
 
     fractions = {}
     for row in  page["interval_rows"]:    # every interval row (label rows skipped)
