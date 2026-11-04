@@ -2,8 +2,9 @@ import ollama
 from ollama import ChatResponse
 import re
 import cv2
+
 # The vision model to use - exact tag, so every machine uses the same one
-VLM_MODEL = "qwen3-vl:4b"
+VLM_MODEL = "qwen3-vl:4b-instruct"
 
 def check_vlm(model=VLM_MODEL):
     """Make sure Ollama is running and the model is downloaded. Call ONCE at the start.
@@ -27,8 +28,9 @@ def check_vlm(model=VLM_MODEL):
 
 # The question for tally cells. Neutral wording: mentioning "groups of 5" made
 COUNT_PROMPT = ("Count the pen lines in this image, including any diagonal line. "
-                "Reply with one number only.")
-
+    "The pencil is faint, so one line often looks dotted, dashed, broken into pieces, "
+    "or drawn with two thin edges. That is still ONE line. "
+    "Reply with one number only.")
 # A count above this is almost certainly a misread -> treat as "needs review"
 MAX_COUNT = 10
 
@@ -71,19 +73,6 @@ def count_tallies(image, model=VLM_MODEL):
         return None
     return count
 
-def count_tallies(image, model=VLM_MODEL):
-    """Ask the model how many tally lines are in one cell.
-
-    Returns the count as an int, or None if the reply isn't a clean number
-    (or is unbelievably large) - None means "needs review", never a guess.
-    """
-    reply = ask_vlm(image, COUNT_PROMPT, model)
-    if not reply.isdigit():
-        return None
-    count = int(reply)
-    if count > MAX_COUNT:
-        return None
-    return count
 
     
 if __name__ == "__main__":

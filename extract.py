@@ -2,21 +2,17 @@ import cv2
 import numpy as np
 from layout import (STUDENT, INSTRUCTOR, ENGAGEMENT, INTER,
                     STUDENT_COLS, INSTRUCTOR_COLS, ENGAGEMENT_COLS, INTER_COLS)
-from image_prep import OUT_DIR
+from image_prep import OUT_DIR, ink_mask, black_on_white
 
-# Threshold of how much ink inside of a check box
-CHECK_THRESHOLD = 0.03
-
-# A pixel counts as ink if it's at least this much darker than the paper (0-255 gray levels).
-# Not Otsu: on scans with very dark grid lines, Otsu's cut-off drops light pencil marks.
-INK_DROP = 30
+# A box is checked if more than this fraction of it is ink
+CHECK_THRESHOLD = 0.02            # was 0.03 - light pencil X's cover a bit less of the box
 
 # All columns that hold checkboxes, left to right
 CODE_COLS = STUDENT_COLS + INSTRUCTOR_COLS + ENGAGEMENT_COLS
 
 # How many pixels to shrink each cell on every side, so the box stays
 # inside the cell and doesn't include the grid lines.
-CELL_MARGIN = 8
+CELL_MARGIN = 10
 
 CODE_NAMES = []
 
@@ -75,8 +71,8 @@ def draw_cells(page):
 def ink_fraction(binary, page, row, col):
     """How much of one checkbox is ink, from 0.0 (empty) to 1.0 (all ink).
 
-    binary: the WHOLE table after threshold() - ink = 255, paper = 0.
-            (Threshold once per page, then call this for each box.)
+    binary: the WHOLE table's ink_mask() - ink = 255, paper = 0.
+            (Make the mask once per page, then call this for each box.)
     page:   one page dict from prepare_pages
     row:    row number (from page["interval_rows"])
     col:    column number (from CODE_COLS), e.g. 1 = student L
@@ -92,30 +88,15 @@ def ink_fraction(binary, page, row, col):
 
     return fraction
 
-def ink_mask(table):
-    """Black-and-white version of the table for reading boxes: ink = 255, paper = 0.
-
-    A pixel is ink if it's at least INK_DROP darker than the paper. The paper
-    colour is the table's median gray (most of the table is white paper), so it
-    adapts to each scan.
-    """
-    paper = np.median(table)
-
-    cutoff = paper - INK_DROP
-    dark_pixels = table < cutoff
-    mask = dark_pixels * 255
-    mask = mask.astype(np.uint8)
-
-    return mask
-
 def measure_page(page):
     """Measure the ink in EVERY checkbox on one page.
-    page:  
 
-    Thresholds the table once, then calls ink_fraction for each box.
+    page: one page dict from prepare_pages
+
+    Builds the ink mask once, then calls ink_fraction for each box.
     Returns a dict {(row, col): ink fraction}, e.g. {(2, 1): 0.0, (3, 1): 0.123, ...}
     """
-    binary = ink_mask(page["table"])            # ONCE for the whole page
+    binary = ink_mask(page["table"])     # ONCE for the whole page (image_prep.ink_mask)
 
     fractions = {}
     for row in  page["interval_rows"]:    # every interval row (label rows skipped)
@@ -232,7 +213,8 @@ def inter_crops(page, labels):
     labels: the interval label of each interval row, top to bottom
             (same as read_page), e.g. INTERVALS[80][3] = ["60-62", ..., "78-80"]
 
-    Returns one dict per crop, in order (2 per interval row), e.g.
+    Each image is the enlarged cell, cleaned by black_on_white: black strokes on
+    pure white, so it's ready for the vision model, e.g.
       [{"interval": "60-62", "name": "E_InterI", "image": <crop>},
        {"interval": "60-62", "name": "E_InterT", "image": <crop>},
        {"interval": "62-64", "name": "E_InterI", "image": <crop>}, ...]
@@ -250,7 +232,7 @@ def inter_crops(page, labels):
             crops.append({
                 "interval": labels[i],               # which row of the CSV, e.g. "60-62"
                 "name": name,                        # which column of the CSV
-                "image": crop_cell(page, row, col),  # the enlarged cell
+                "image": black_on_white(crop_cell(page, row, col)),  # the enlarged cell
             })
     return crops
 

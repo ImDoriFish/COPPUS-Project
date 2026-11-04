@@ -139,6 +139,57 @@ def threshold(gray):
     return binary
 
 
+# Two ways to make a black-and-white image:
+#   threshold() - Otsu: for FINDING the table and its grid lines (they're dark)
+#   ink_mask()  - paper-relative: for READING pen/pencil marks in the boxes (can be light)
+
+# A pixel counts as ink if it's at least this much darker than the paper (0-255 gray levels).
+# Not Otsu: on scans with very dark grid lines, Otsu's cut-off drops light pencil marks.
+INK_DROP = 30
+
+
+def ink_mask(table):
+    """Black-and-white version of the table for reading boxes: ink = 255, paper = 0.
+
+    A pixel is ink if it's at least INK_DROP darker than the paper. The paper
+    colour is the table's median gray (most of the table is white paper), so it
+    adapts to each scan.
+    """
+    paper = np.median(table)            # e.g. 254
+
+    cutoff = paper - INK_DROP           # darker than this = ink
+    dark_pixels = table < cutoff        # True / False for every pixel
+    mask = dark_pixels * 255            # True -> 255, False -> 0
+    mask = mask.astype(np.uint8)        # back to a normal 8-bit image
+
+    return mask
+
+
+# Cleaning for the vision model (black_on_white)
+JOIN_KERNEL = (9, 25)  # (width, height) of the closing kernel: joins dashed / hollow strokes
+MIN_BLOB = 150         # ink blobs smaller than this many pixels are specks -> removed
+
+
+def black_on_white(gray):
+    """Gray crop -> clean black strokes on pure white paper (for the vision model).
+
+    1. ink_mask: faint pencil -> solid ink, light grey noise -> paper
+    2. clear a thin strip along the edges (grid-line fringe is not a stroke)
+    3. close with a tall thin kernel: joins dashed / double-edged strokes into one line
+    4. remove tiny specks
+    Returns black ink (0) on white paper (255).
+    """
+    ink = ink_mask(gray)
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, JOIN_KERNEL)
+    ink = cv2.morphologyEx(ink, cv2.MORPH_CLOSE, kernel)
+
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(ink)
+    for blob in range(1, count):                         # 0 is the background
+        if stats[blob, cv2.CC_STAT_AREA] < MIN_BLOB:
+            ink[labels == blob] = 0                      # a speck -> paper
+
+    return 255 - ink             
 # ---------- Step 5: find the table ----------
 MIN_TABLE_FRACTION = 0.2
 
@@ -242,14 +293,6 @@ def warp_table(gray, corners):
     matrix = cv2.getPerspectiveTransform(corners, dst)   # the "how to move pixels" recipe
     return cv2.warpPerspective(gray, matrix, (w, h))     # size is (width, height)!
 
-
-# ---------- normalized the table ----------
-
-def normalize_table(table, page):
-    """Resize a warped table to its page's exact stored size (layout.PAGE_SIZES).
-    """
-
-    return cv2.resize(table, PAGE_SIZES[page])
 
 # ---------- Pipeline: run all prep steps on every page ----------
 
